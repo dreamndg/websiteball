@@ -49,7 +49,7 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
    "  float G=clamp((base.b-0.12)/0.6,0.0,1.0);",
    "  float lum=dot(l.rgb,vec3(0.3333));",
    "  vec3 lit=l.rgb*vec3(1.0,0.97,0.94)*(1.0+(D-1.0)*0.2)+0.10*(1.0-lum);",
-   "  lit=lit*(1.0-0.85*G)+base.rgb*0.85*G;",
+   "  lit=lit*(1.0-0.85*G)+vec3(1.0)*0.85*G;",
    "  vec3 col=mix(base.rgb,lit,l.a);",
    "  gl_FragColor=vec4(col,base.a);",
    "}"].join("\n");
