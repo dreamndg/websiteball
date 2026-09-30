@@ -14,7 +14,8 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
   // ================= SETTINGS =================
   var LINK_URL    = "https://YOUR-PORTFOLIO-URL";  // <-- where a click on the ball goes
   var LINK_TARGET = "_blank";   // "_blank" = new tab, "_top" = same tab (test this in Framer)
-  var AUTO_SPIN   = 0.008;      // idle spin speed, radians/frame (0 = ball stays still)
+  var AUTO_SPIN   = 0.0035;     // idle spin speed, radians/frame (0 = ball stays still). Idle spin follows the last pull direction
+  var LIGHT_SHIFT = 0.09;       // how far the lighting slides while spinning (0 = static lighting)
   var DRAG_SPEED  = 0.012;      // how strongly dragging spins the ball
   var FRICTION    = 0.955;      // 0.9 = stops quickly, 0.99 = keeps gliding
   var BACK_LOGO   = false;      // true = put a second logo on the back, like a real pool ball
@@ -35,12 +36,12 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
   var VERT="varying vec3 vL;varying vec3 vV;void main(){vL=normal;vV=normalize(normalMatrix*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}";
   var FRAG=[
    "precision highp float;",
-   "uniform sampler2D tShade,tLogo,tD;uniform vec3 uC;uniform vec4 uCrop;uniform float uBack;",
+   "uniform sampler2D tShade,tLogo,tD;uniform vec2 uOff;uniform vec3 uC;uniform vec4 uCrop;uniform float uBack;",
    "varying vec3 vL;varying vec3 vV;",
    "vec4 lg(vec2 xy){vec2 pix=uC.xy+uC.z*vec2(xy.x,-xy.y);",
    "  vec2 uv=vec2((pix.x-uCrop.x)/uCrop.z,1.0-(pix.y-uCrop.y)/uCrop.w);return texture2D(tLogo,uv);}",
    "void main(){",
-   "  vec3 n=normalize(vV);vec2 suv=n.xy*0.5+0.5;",
+   "  vec3 n=normalize(vV);vec2 suv=n.xy*0.5+0.5+uOff*smoothstep(0.35,0.85,n.z);",
    "  vec4 base=texture2D(tShade,suv);float D=texture2D(tD,suv).r;",
    "  vec3 p=normalize(vL);",
    "  vec4 f=lg(p.xy);f.a*=smoothstep(0.25,0.4,p.z);",
@@ -64,7 +65,7 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
     var mat=new THREE.ShaderMaterial({vertexShader:VERT,fragmentShader:FRAG,transparent:true,
       uniforms:{tShade:{value:tex.shade},tLogo:{value:tex.logo},tD:{value:tex.d},
         uC:{value:new THREE.Vector3(CIRC[0],CIRC[1],CIRC[2])},uCrop:{value:new THREE.Vector4(CROP[0],CROP[1],CROP[2],CROP[3])},
-        uBack:{value:BACK_LOGO?1:0}}});
+        uBack:{value:BACK_LOGO?1:0},uOff:{value:new THREE.Vector2(0,0)}}});
     mesh=new THREE.Mesh(new THREE.SphereGeometry(1,128,96),mat); scene.add(mesh);
   }
 
@@ -78,11 +79,13 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
 
   var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
   var auto=reduce?0:AUTO_SPIN, dragging=false, lx=0, ly=0, vx=0, vy=0, sx=0, sy=0, st=0;
-  var tmp=new THREE.Quaternion(), axis=new THREE.Vector3(), Y=new THREE.Vector3(0,1,0);
-  function spin(dx,dy){ // dx,dy in pixels of drag -> free 360 rotation in any direction
-    var ang=Math.hypot(dx,dy)*DRAG_SPEED; if(!ang||!mesh) return;
-    axis.set(dy,dx,0).normalize(); tmp.setFromAxisAngle(axis,ang); mesh.quaternion.premultiply(tmp);
+  var idx=1, idy=0;      // idle spin direction: follows the last pull
+  var lsx=0, lsy=0;      // smoothed motion that drives the lighting
+  var tmp=new THREE.Quaternion(), axis=new THREE.Vector3();
+  function rot(ax,ay,ang){ // free 360 rotation in any direction
+    if(!ang||!mesh) return; axis.set(ay,ax,0).normalize(); tmp.setFromAxisAngle(axis,ang); mesh.quaternion.premultiply(tmp);
   }
+  function spin(dx,dy){ rot(dx,dy,Math.hypot(dx,dy)*DRAG_SPEED); }
   function overBall(e){
     var r=canvas.getBoundingClientRect(), rad=Math.min(r.width,r.height)/2/HALF;
     return Math.hypot(e.clientX-(r.left+r.width/2),e.clientY-(r.top+r.height/2))<=rad;
@@ -94,7 +97,8 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
   });
   canvas.addEventListener('pointermove',function(e){
     if(dragging){ var dx=e.clientX-lx,dy=e.clientY-ly; lx=e.clientX; ly=e.clientY;
-      spin(dx,dy); vx=vx*0.5+dx*0.5; vy=vy*0.5+dy*0.5; }
+      spin(dx,dy); vx=vx*0.5+dx*0.5; vy=vy*0.5+dy*0.5;
+      var m=Math.hypot(vx,vy); if(m>1){ idx=vx/m; idy=vy/m; } }
     else canvas.style.cursor=overBall(e)?'pointer':'default';
   });
   function up(e){
@@ -108,9 +112,14 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
 
   (function loop(){
     requestAnimationFrame(loop);
-    if(mesh&&!dragging){
-      spin(vx,vy); vx*=FRICTION; vy*=FRICTION;
-      if(auto){ tmp.setFromAxisAngle(Y,auto); mesh.quaternion.premultiply(tmp); }
+    if(mesh){
+      var tx=0,ty=0;
+      if(dragging){ vx*=0.9; vy*=0.9; tx=vx*DRAG_SPEED; ty=vy*DRAG_SPEED; }
+      else { spin(vx,vy); vx*=FRICTION; vy*=FRICTION; rot(idx,idy,auto);
+             tx=vx*DRAG_SPEED+idx*auto; ty=vy*DRAG_SPEED+idy*auto; }
+      lsx+=(tx-lsx)*0.1; lsy+=(ty-lsy)*0.1;
+      var mag=Math.hypot(lsx,lsy), off=mesh.material.uniforms.uOff.value;
+      if(mag>1e-6){ var k=LIGHT_SHIFT*Math.tanh(mag*9)/mag; off.set(lsx*k,-lsy*k); } else off.set(0,0);
     }
     renderer.render(scene,cam);
   })();
